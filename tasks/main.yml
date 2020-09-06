@@ -1,0 +1,83 @@
+---
+- name: Include Debian tasks
+  include: Debian.yml
+  when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+
+- name: Include CentOS tasks
+  include: CentOS.yml
+  when: ansible_distribution == "CentOS"
+
+- name: Ensure docker started and enabled
+  systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Generate an server OpenSSL private key
+  openssl_privatekey:
+    path: /etc/docker/ca.key
+    size: 4096
+  when: docker_tls
+
+- name: Generate an server OpenSSL Certificate Signing Request
+  openssl_csr:
+    path: /etc/docker/ca.csr
+    privatekey_path: /etc/docker/ca.key
+    common_name: "{{ docker_server_hostname }}"
+  when: docker_tls
+
+- name: Generate a server Self Signed OpenSSL certificate
+  openssl_certificate:
+    path: /etc/docker/ca.crt
+    privatekey_path: /etc/docker/ca.key
+    csr_path: /etc/docker/ca.csr
+    provider: selfsigned
+  when: docker_tls
+
+- name: Ensure dir for clients certs exists
+  file:
+    path: /etc/docker/clients
+    state: directory
+  when: docker_tls
+
+- name: Generate an client OpenSSL private key
+  openssl_privatekey:
+    path: "/etc/docker/clients/{{ item }}.key"
+    size: 4096
+  with_items: "{{ docker_clients }}"
+  when: docker_tls
+
+- name: Generate an client OpenSSL Certificate Signing Request
+  openssl_csr:
+    path: "/etc/docker/clients/{{ item }}.csr"
+    privatekey_path: "/etc/docker/clients/{{ item }}.key"
+    common_name: "{{ item }}"
+  with_items: "{{ docker_clients }}"
+  when: docker_tls
+
+- name: Generate an OpenSSL certificate signed with your own CA certificate
+  openssl_certificate:
+    path: "/etc/docker/clients/{{ item }}.crt"
+    csr_path: "/etc/docker/clients/{{ item }}.csr"
+    ownca_path: /etc/docker/ca.crt
+    ownca_privatekey_path: /etc/docker/ca.key
+    provider: ownca
+  with_items: "{{ docker_clients }}"
+  when: docker_tls
+
+- name: Template docker config
+  template:
+    src: config.json.j2
+    dest: /etc/docker/daemon.json
+  notify:
+    - restart docker
+
+- name: Remove some options from docker unit
+  lineinfile:
+    path: /lib/systemd/system/docker.service
+    regexp: '^ExecStart=\/usr\/bin\/dockerd -H fd:\/\/ --containerd=\/run\/containerd\/containerd.sock'
+    line: 'ExecStart=/usr/bin/dockerd --containerd=/run/containerd/containerd.sock'
+    backrefs: true
+  when: docker_tls
+  notify:
+    - reload systemd

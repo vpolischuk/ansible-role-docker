@@ -1,0 +1,13 @@
+{
+{% if docker_tls %}
+  "tls": true,
+  "tlsverify": true,
+  "tlscert": "/etc/docker/ca.crt",
+  "tlskey": "/etc/docker/ca.key",
+  "hosts": ["fd://","tcp://{{ docker_ip }}:2376"],
+{% endif %}
+  "log-opts": {
+	"max-size": "{{ docker_log_max_size }}",
+	"max-file": "{{ docker_log_max_file }}"
+  }
+}
